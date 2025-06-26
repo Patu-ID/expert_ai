@@ -18,10 +18,10 @@ docling
 
 # Text Processing
 langchain
+langchain-ibm
 langchain-community
 langchain-text-splitters
 langgraph
-
 # File Processing
 python-multipart
 
