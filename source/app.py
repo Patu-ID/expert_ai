@@ -14,7 +14,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 from services.agent.agent import ExpertORTAgent
+from services.document.document_service import DocumentService
 from api.routers.agent_router import create_agent_router
+from api.routers.document_router import create_document_router
 
 
 def create_app() -> FastAPI:
@@ -46,9 +48,17 @@ def create_app() -> FastAPI:
     print("🚀 Initializing ExpertORT Agent...")
     agent = ExpertORTAgent()
     
+    # Initialize the document service
+    print("📚 Initializing Document Service...")
+    document_service = DocumentService()
+    
     # Create and include the agent router
     agent_router = create_agent_router(agent)
     app.include_router(agent_router, tags=["agent"])
+    
+    # Create and include the document router
+    document_router = create_document_router(document_service)
+    app.include_router(document_router, tags=["documents"])
     
     # Add health check endpoint
     @app.get("/health")
@@ -58,7 +68,9 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "service": "ExpertORT Agent",
             "version": "1.0.0",
-            "knowledge_base_available": agent.retrieval_system is not None
+            "knowledge_base_available": agent.retrieval_system is not None,
+            "document_indexing_available": document_service.indexer is not None,
+            "document_retrieval_available": document_service.retriever is not None
         }
     
     # Add root endpoint
@@ -72,6 +84,10 @@ def create_app() -> FastAPI:
             "endpoints": {
                 "agents": "/v1/agents",
                 "chat": "/v1/chat",
+                "index_file": "/v1/documents/index",
+                "query_documents": "/v1/documents/query",
+                "index_stats": "/v1/documents/index/{index_name}/stats",
+                "search_document": "/v1/documents/search/{document_name}",
                 "health": "/health",
                 "docs": "/docs"
             }
@@ -94,6 +110,8 @@ def main():
     print("🔍 Health check at: http://localhost:8081/health")
     print("🤖 Agent discovery at: http://localhost:8081/v1/agents")
     print("💬 Chat endpoint at: http://localhost:8081/v1/chat")
+    print("📄 Index files at: http://localhost:8081/v1/documents/index")
+    print("🔍 Query documents at: http://localhost:8081/v1/documents/query")
     
     uvicorn.run(
         "app:app",

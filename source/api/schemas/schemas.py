@@ -5,6 +5,7 @@ Defines the data models used by the API endpoints following the Agent Connect pr
 
 from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
+from fastapi import UploadFile
 
 
 class Message(BaseModel):
@@ -79,3 +80,53 @@ class ErrorResponse(BaseModel):
     error: str
     message: str
     code: Optional[int] = None
+
+
+class FileIndexRequest(BaseModel):
+    """File indexing request schema."""
+    index_name: str
+    chunk_size: Optional[int] = 500
+    chunk_overlap: Optional[int] = 50
+
+
+class FileIndexResponse(BaseModel):
+    """File indexing response schema."""
+    status: str
+    message: str
+    document_name: str
+    total_chunks: Optional[int] = None
+    indexed_successfully: Optional[int] = None
+    failed_to_index: Optional[int] = None
+    index_name: Optional[str] = None
+
+
+class QueryRequest(BaseModel):
+    """Query request schema."""
+    query: str
+    k: Optional[int] = 10
+    top_p: Optional[int] = 3
+    min_score: Optional[float] = 0.1
+    index_name: Optional[str] = None
+
+
+class DocumentResult(BaseModel):
+    """Individual document result schema."""
+    id: str
+    score: float
+    rerank_score: Optional[float] = None
+    content: str
+    metadata: Dict[str, Any]
+    document_name: str
+    chunk_id: int
+    content_length: int
+    indexed_at: str
+
+
+class QueryResponse(BaseModel):
+    """Query response schema."""
+    status: str
+    query: str
+    total_candidates: int
+    returned_results: int
+    results: List[DocumentResult]
+    search_metadata: Dict[str, Any]
