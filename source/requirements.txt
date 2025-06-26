@@ -8,7 +8,7 @@ pydantic-settings
 python-dotenv
 
 # Elasticsearch
-elasticsearch
+elasticsearch==8.10.1
 
 # IBM Watsonx.ai
 ibm-watson-machine-learning

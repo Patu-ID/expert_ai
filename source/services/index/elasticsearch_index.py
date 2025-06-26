@@ -11,6 +11,9 @@ from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import Embeddings
 from ibm_watsonx_ai.metanames import EmbedTextParamsMetaNames as EmbedParams
 from ibm_watsonx_ai.foundation_models.utils.enums import EmbeddingTypes
+from elasticsearch import Elasticsearch
+import uuid
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -149,6 +152,112 @@ def generate_embeddings_for_chunks(chunks):
     return enriched_chunks
 
 
+def index_chunks_to_elasticsearch(enriched_chunks, document_name="Attention Is All You Need"):
+    """
+    Index enriched chunks with embeddings to Elasticsearch.
+    
+    Args:
+        enriched_chunks (list): List of dictionaries containing chunk content, metadata, and embeddings
+        document_name (str): Name of the source document
+        
+    Returns:
+        dict: Indexing results and statistics
+    """
+    # Get Elasticsearch credentials from environment variables
+    es_host = os.getenv('ELASTICSEARCH_HOST')
+    es_port = os.getenv('ELASTICSEARCH_PORT')
+    es_username = os.getenv('ELASTICSEARCH_USERNAME')
+    es_password = os.getenv('ELASTICSEARCH_PASSWORD')
+    es_index = os.getenv('ELASTICSEARCH_INDEX_NAME')
+    
+    if not all([es_host, es_port, es_username, es_password, es_index]):
+        raise ValueError("Missing Elasticsearch credentials in environment variables")
+    
+    # Create Elasticsearch client - using simple URL format that works with IBM Cloud
+    es_url = f"https://{es_username}:{es_password}@{es_host}:{es_port}"
+    
+    es_client = Elasticsearch(
+        hosts=[es_url],
+        verify_certs=False,  # Disable SSL certificate verification for self-signed cert
+        ssl_show_warn=False,  # Disable SSL warnings
+        request_timeout=60,
+        headers={"Accept": "application/json", "Content-Type": "application/json"}  # Force standard JSON headers
+    )
+    
+    print(f"Connecting to Elasticsearch at {es_host}:{es_port}")
+    
+    # Check if Elasticsearch is available by trying to get cluster info directly
+    try:
+        # Try to get cluster info directly instead of ping
+        cluster_info = es_client.info()
+        print(f"Connected successfully! Cluster: {cluster_info.get('cluster_name', 'Unknown')}")
+        print(f"Elasticsearch version: {cluster_info.get('version', {}).get('number', 'Unknown')}")
+        
+    except Exception as e:
+        print(f"Connection error details: {e}")
+        raise ConnectionError(f"Could not connect to Elasticsearch: {e}")
+    
+    print(f"Connected successfully! Indexing {len(enriched_chunks)} chunks to index '{es_index}'")
+    
+    # Index each chunk
+    indexed_count = 0
+    failed_count = 0
+    results = []
+    
+    for i, chunk in enumerate(enriched_chunks):
+        try:
+            # Create document structure for Elasticsearch
+            doc = {
+                'content': chunk['content'],
+                'embedding': chunk['embedding'],
+                'metadata': chunk['metadata'],
+                'document_name': document_name,
+                'chunk_id': i,
+                'content_length': len(chunk['content']),
+                'embedding_dimensions': len(chunk['embedding']),
+                'indexed_at': datetime.now().isoformat()
+            }
+            
+            # Generate unique document ID
+            doc_id = f"{document_name.replace(' ', '_').lower()}_{i}_{str(uuid.uuid4())[:8]}"
+            
+            # Index the document
+            response = es_client.index(
+                index=es_index,
+                id=doc_id,
+                body=doc
+            )
+            
+            results.append({
+                'chunk_id': i,
+                'doc_id': doc_id,
+                'status': 'success',
+                'response': response['result']
+            })
+            indexed_count += 1
+            
+            if (i + 1) % 10 == 0:
+                print(f"Indexed {i + 1}/{len(enriched_chunks)} chunks...")
+                
+        except Exception as e:
+            print(f"Failed to index chunk {i}: {e}")
+            results.append({
+                'chunk_id': i,
+                'status': 'failed',
+                'error': str(e)
+            })
+            failed_count += 1
+    
+    # Return indexing statistics
+    return {
+        'total_chunks': len(enriched_chunks),
+        'indexed_successfully': indexed_count,
+        'failed_to_index': failed_count,
+        'index_name': es_index,
+        'results': results
+    }
+
+
 if __name__ == "__main__":
     print("Converting 'Attention Is All You Need.pdf' to markdown...")
     try:
@@ -178,8 +287,8 @@ if __name__ == "__main__":
         print("GENERATING EMBEDDINGS:")
         print("="*50)
         
-        # Generate embeddings for first 3 chunks as a test
-        test_chunks = chunks[:3]
+        # Generate embeddings for first 5 chunks as a test
+        test_chunks = chunks[:5]
         enriched_chunks = generate_embeddings_for_chunks(test_chunks)
         
         print(f"Generated embeddings for {len(enriched_chunks)} chunks")
@@ -191,6 +300,26 @@ if __name__ == "__main__":
             print(f"Embedding dimensions: {len(enriched_chunk['embedding'])}")
             print(f"Embedding preview: {enriched_chunk['embedding'][:5]}...")
             print("-" * 30)
+        
+        print("\n" + "="*50)
+        print("INDEXING TO ELASTICSEARCH:")
+        print("="*50)
+        
+        # Index the enriched chunks to Elasticsearch
+        indexing_results = index_chunks_to_elasticsearch(enriched_chunks)
+        
+        print(f"\nIndexing Results:")
+        print(f"Total chunks: {indexing_results['total_chunks']}")
+        print(f"Successfully indexed: {indexing_results['indexed_successfully']}")
+        print(f"Failed to index: {indexing_results['failed_to_index']}")
+        print(f"Index name: {indexing_results['index_name']}")
+        
+        # Show some successful indexing results
+        successful_results = [r for r in indexing_results['results'] if r['status'] == 'success']
+        if successful_results:
+            print(f"\nFirst few successful indexing operations:")
+            for result in successful_results[:3]:
+                print(f"- Chunk {result['chunk_id']}: {result['response']} (ID: {result['doc_id']})")
             
     except Exception as e:
         print(f"Error: {e}")
