@@ -9,6 +9,14 @@ A sophisticated Retrieval-Augmented Generation (RAG) system that enables intelli
 - [The Complete Indexing Pipeline](#the-complete-indexing-pipeline)
 - [Technical Components](#technical-components)
 - [API Endpoints for Indexing](#api-endpoints-for-indexing)
+- [Agent System Architecture](#agent-system-architecture)
+- [Large Language Model Configuration](#large-language-model-configuration)
+- [Agent Tools System](#agent-tools-system)
+- [System Prompt Design](#system-prompt-design)
+- [Agent Orchestration with LangGraph](#agent-orchestration-with-langgraph)
+- [Chat Processing System](#chat-processing-system)
+- [Agent Connect Protocol Implementation](#agent-connect-protocol-implementation)
+- [ExpertORT User Interface System](#expertort-user-interface-system)
 - [Configuration Requirements](#configuration-requirements)
 
 ## 🗂️ Document Indexing System Overview
@@ -1096,3 +1104,1101 @@ SIMILARITY_CALCULATION_VERBOSE=false
 ---
 
 *This retrieval system provides sophisticated semantic search capabilities that enable the ExpertORT Agent to find and rank the most relevant document chunks for any user query, forming the foundation for accurate and contextual question-answering.*
+
+## 🤖 Agent System Architecture
+
+The ExpertORT Agent represents the intelligent core of the system, combining advanced language models with Retrieval-Augmented Generation (RAG) capabilities to provide contextual responses to student queries. Built using LangGraph and IBM Watson AI, the agent delivers sophisticated academic assistance tailored for Universidad ORT Uruguay students.
+
+### Agent System Overview
+
+The agent system integrates multiple AI technologies to deliver intelligent, context-aware responses:
+
+```
+🤖 Agent Architecture
+├── 🧠 LLM Layer (IBM Watsonx.ai)
+│   └── Meta-Llama 3.2 90B Vision Instruct
+├── 🔧 Tool System (LangChain Tools)
+│   └── Knowledge Base Search Tool
+├── 🔄 Orchestration Layer (LangGraph)
+│   └── ReAct Agent Pattern
+├── 🔍 Knowledge Integration
+│   └── Elasticsearch + Semantic Search + Reranking
+└── 🌐 API Layer (Agent Connect Protocol)
+    ├── Chat Completions (/v1/chat)
+    └── Agent Discovery (/v1/agents)
+```
+
+## 🧠 Large Language Model Configuration
+
+### Model Specifications
+
+**Location**: `services/agent/agent.py`
+
+```python
+# LLM Configuration
+parameters = {
+    "frequency_penalty": 0,        # No repetition penalty
+    "max_tokens": 2000,           # Maximum response length
+    "presence_penalty": 0,        # No presence penalty
+    "temperature": 0.7,           # Balanced creativity/precision
+    "top_p": 1                    # Full vocabulary consideration
+}
+
+llm = ChatWatsonx(
+    model_id=os.getenv("WATSONX_MODEL_ID", "meta-llama/llama-3-2-90b-vision-instruct"),
+    url=os.getenv("WATSONX_URL"),
+    project_id=os.getenv("WATSONX_PROJECT_ID"),
+    apikey=os.getenv("WATSONX_API_KEY"),
+    params=parameters
+)
+```
+
+**Model Details**:
+- **Model**: Meta-Llama 3.2 90B Vision Instruct
+- **Provider**: IBM Watsonx.ai
+- **Capabilities**: 
+  - Multilingual support (Spanish/English)
+  - Vision capabilities for document understanding
+  - Instruction following and reasoning
+  - Academic domain knowledge
+- **Context Window**: Optimized for educational content
+- **Performance**: Enterprise-grade reliability and speed
+
+### Model Parameters Explanation
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| `temperature` | 0.7 | Balanced responses - creative but focused |
+| `max_tokens` | 2000 | Comprehensive responses without truncation |
+| `frequency_penalty` | 0 | Natural language flow |
+| `presence_penalty` | 0 | No topic avoidance |
+| `top_p` | 1 | Full vocabulary access for precise terminology |
+
+## 🛠️ Agent Tools System
+
+### Knowledge Base Search Tool
+
+**Location**: `services/agent/agent.py`
+
+```python
+@tool
+def buscar_en_base_de_conocimientos(query: str) -> str:
+    """
+    Busca información en la base de conocimientos de ExpertORT usando búsqueda semántica y reranking.
+    
+    Args:
+        query (str): La consulta o pregunta del usuario
+        
+    Returns:
+        str: Información relevante encontrada en la base de conocimientos
+    """
+```
+
+**Tool Capabilities**:
+
+1. **Semantic Search**: 
+   - Queries knowledge base using vector embeddings
+   - Retrieves top-10 initial candidates
+   - Applies minimum relevance threshold (0.1)
+
+2. **Intelligent Reranking**:
+   - Cross-encoder reranking for precision
+   - Selects top-3 most relevant results
+   - Contextual relevance optimization
+
+3. **Response Formatting**:
+   - Structured information presentation
+   - Source attribution and citations
+   - Content truncation for readability
+   - Search metadata and statistics
+
+**Tool Workflow**:
+
+```python
+# Step 1: Initial semantic search
+initial_results = self.retrieval_system.retrieve_top_k_documents(
+    query=query,
+    k=10,                    # Initial candidates
+    min_score=0.1           # Relevance threshold
+)
+
+# Step 2: Intelligent reranking
+reranked_results = self.retrieval_system.rerank_documents(
+    query=query,
+    documents=initial_results,
+    top_p=3                 # Final results
+)
+
+# Step 3: Format structured response
+response_parts = []
+response_parts.append(f"📚 **Información encontrada para: '{query}'**\n")
+
+for i, result in enumerate(reranked_results, 1):
+    document_name = result.get('document_name', 'Documento desconocido')
+    chunk_id = result.get('chunk_id', 0)
+    content = result.get('content', '').strip()
+    
+    response_parts.append(f"\n**📖 Resultado {i}:**")
+    response_parts.append(f"*Fuente: {document_name} - Sección {chunk_id}*")
+    response_parts.append(f"\n{content}\n")
+```
+
+## 📝 System Prompt Design
+
+### Core Prompt Structure
+
+**Location**: `services/agent/agent.py`
+
+```python
+prompt = (
+    "Tu objetivo es ayudar a estudiantes de la Universidad ORT Uruguay a resolver sus dudas académicas. "
+    "Eres un asistente inteligente especializado en proporcionar información educativa precisa y útil.\n\n"
+    
+    "INSTRUCCIONES:\n"
+    "1. Cuando recibas una pregunta académica, usa la herramienta 'buscar_en_base_de_conocimientos' para encontrar información relevante.\n"
+    "2. Analiza cuidadosamente los resultados de búsqueda y proporciona una respuesta clara y completa.\n"
+    "3. Si la información no está disponible en la base de conocimientos, explícalo claramente.\n"
+    "4. Mantén un tono profesional pero amigable, apropiado para estudiantes universitarios.\n"
+    "5. Cita las fuentes cuando proporciones información específica de los documentos.\n\n"
+    
+    "CAPACIDADES:\n"
+    "- Búsqueda semántica avanzada en documentos académicos\n"
+    "- Reranking inteligente para encontrar la información más relevante\n"
+    "- Análisis de múltiples fuentes documentales\n\n"
+    
+    "Siempre busca primero en la base de conocimientos antes de responder preguntas."
+)
+```
+
+### Prompt Design Principles
+
+**1. Role Definition**:
+- Clear identity as Universidad ORT Uruguay assistant
+- Academic specialization and educational focus
+- Student-centric approach
+
+**2. Behavioral Instructions**:
+- Mandatory knowledge base consultation
+- Structured analysis and response methodology
+- Transparent information availability communication
+- Professional but approachable tone
+
+**3. Capability Awareness**:
+- Explicit tool usage guidelines
+- Technical capability communication
+- Source attribution requirements
+
+**4. Quality Assurance**:
+- Always search before responding
+- Clear error communication
+- Structured response formatting
+
+## 🔄 Agent Orchestration with LangGraph
+
+### ReAct Agent Pattern
+
+**Location**: `services/agent/agent.py`
+
+```python
+# Create ReAct agent with tools and prompt
+return create_react_agent(llm, tools, prompt=prompt)
+```
+
+**ReAct (Reasoning + Acting) Framework**:
+
+1. **Reasoning**: Agent analyzes the user query and determines what information is needed
+2. **Acting**: Agent uses tools (knowledge base search) to gather relevant information  
+3. **Observing**: Agent processes tool results and evaluates information quality
+4. **Responding**: Agent synthesizes information into a coherent, helpful response
+
+**Execution Flow**:
+
+```
+User Query → Reasoning → Tool Selection → Tool Execution → Result Analysis → Response Generation
+     ↑                                                                              ↓
+     └── Feedback Loop (if additional information needed) ←─────────────────────────┘
+```
+
+## 💬 Chat Processing System
+
+### Non-Streaming Chat Completion
+
+**Location**: `services/agent/agent.py`
+
+```python
+def process_chat_completion(self, messages: List[Dict[str, Any]]) -> str:
+    """
+    Process a chat completion request.
+    
+    Args:
+        messages: List of message dictionaries with 'role' and 'content'
+        
+    Returns:
+        str: The agent's response
+    """
+    # Convert messages to LangChain format
+    langchain_messages = []
+    for msg in messages:
+        if msg["role"] == "user":
+            langchain_messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            langchain_messages.append(AIMessage(content=msg["content"]))
+    
+    # Execute the agent
+    result = self.agent_executor.invoke({"messages": langchain_messages})
+    final_message = result["messages"][-1]
+    
+    return final_message.content
+```
+
+### Streaming Chat Completion
+
+**Location**: `services/agent/agent.py`
+
+```python
+async def process_streaming_chat(self, messages: List[Dict[str, Any]], thread_id: str) -> AsyncGenerator[str, None]:
+    """
+    Process a streaming chat completion request.
+    
+    Args:
+        messages: List of message dictionaries with 'role' and 'content'
+        thread_id: Thread identifier for the conversation
+        
+    Yields:
+        str: Streaming response chunks in Server-Sent Events format
+    """
+    # Send thinking step
+    thinking_step = {
+        "id": f"step-{uuid.uuid4()}",
+        "object": "thread.run.step.delta",
+        "thread_id": thread_id,
+        "model": "expertort-agent",
+        "created": int(time.time()),
+        "choices": [
+            {
+                "delta": {
+                    "role": "assistant",
+                    "step_details": {
+                        "type": "thinking",
+                        "content": "Analizando la consulta y formulando una respuesta..."
+                    }
+                }
+            }
+        ]
+    }
+    
+    yield f"event: thread.run.step.delta\n"
+    yield f"data: {json.dumps(thinking_step)}\n\n"
+    
+    # Get and stream the response
+    response_content = self.process_chat_completion(messages)
+    message_chunks = self._split_into_chunks(response_content)
+    
+    for chunk in message_chunks:
+        message_delta = {
+            "id": f"msg-{uuid.uuid4()}",
+            "object": "thread.message.delta",
+            "thread_id": thread_id,
+            "model": "expertort-agent",
+            "created": int(time.time()),
+            "choices": [
+                {
+                    "delta": {
+                        "role": "assistant",
+                        "content": chunk
+                    }
+                }
+            ]
+        }
+        
+        yield f"event: thread.message.delta\n"
+        yield f"data: {json.dumps(message_delta)}\n\n"
+```
+
+**Streaming Features**:
+- **Real-time Response**: Progressive message delivery
+- **Thinking Indicators**: Shows processing status
+- **Server-Sent Events**: Standard streaming protocol
+- **Chunk-based Delivery**: Optimized for user experience
+
+## 🔧 Agent Initialization & Lazy Loading
+
+### Smart Initialization Strategy
+
+**Location**: `services/agent/agent.py`
+
+```python
+class ExpertORTAgent:
+    def __init__(self):
+        """Initialize the ExpertORT Agent with all required components."""
+        print("🤖 Initializing ExpertORT Agent...")
+        
+        # Use lazy initialization - services will be created only when needed
+        self._retrieval_system = None
+        self._agent_executor = None
+        
+        print("✅ ExpertORT Agent initialized with lazy loading!")
+    
+    @property
+    def retrieval_system(self):
+        """Get the retrieval system instance using lazy initialization."""
+        if self._retrieval_system is None:
+            self._retrieval_system = self._initialize_retrieval_system()
+        return self._retrieval_system
+    
+    @property
+    def agent_executor(self):
+        """Get the agent executor instance using lazy initialization."""
+        if self._agent_executor is None:
+            self._agent_executor = self._create_agent()
+        return self._agent_executor
+```
+
+**Benefits of Lazy Loading**:
+- **Faster Startup**: Agent initializes quickly without loading all dependencies
+- **Resource Efficiency**: Only loads components when actually needed
+- **Error Isolation**: Graceful degradation if some services are unavailable
+- **Scalability**: Better resource management in multi-instance deployments
+
+## 📡 Agent Connect Protocol Implementation
+
+### Agent Discovery Endpoint
+
+**Location**: `api/routers/agent_router.py`
+
+```python
+@router.get("/v1/agents", response_model=AgentDiscoveryResponse)
+async def discover_agents():
+    """
+    Agent discovery endpoint.
+    Returns information about available agents.
+    """
+    agent_info_dict = self.agent.get_agent_info()
+    
+    agent_info = AgentInfo(
+        name=agent_info_dict["name"],
+        description=agent_info_dict["description"],
+        provider=AgentProvider(**agent_info_dict["provider"]),
+        version=agent_info_dict["version"],
+        documentation_url=agent_info_dict["documentation_url"],
+        capabilities=AgentCapabilities(**agent_info_dict["capabilities"])
+    )
+    
+    return AgentDiscoveryResponse(agents=[agent_info])
+```
+
+**Agent Information Response**:
+```json
+{
+  "agents": [
+    {
+      "name": "Agente ExpertORT",
+      "description": "Agente especializado en ayudar a estudiantes de la Universidad ORT Uruguay a resolver sus dudas académicas.",
+      "provider": {
+        "organization": "Facundo Iraola Dopazo",
+        "url": "facundoiraoladopazo.com"
+      },
+      "version": "1.0.0",
+      "documentation_url": "https://docs.example.com/expertort-agent",
+      "capabilities": {
+        "streaming": true,
+        "knowledge_base": true,
+        "semantic_search": true,
+        "reranking": true
+      }
+    }
+  ]
+}
+```
+
+### Chat Completion Endpoint
+
+**Location**: `api/routers/agent_router.py`
+
+```python
+@router.post("/v1/chat")
+async def chat_completion(
+    request: ChatRequest, 
+    x_thread_id: Optional[str] = Header(None)
+):
+    """
+    Chat completion endpoint.
+    Handles both streaming and non-streaming chat completions.
+    """
+    thread_id = x_thread_id or str(uuid.uuid4())
+    
+    # Handle streaming response
+    if request.stream:
+        return StreamingResponse(
+            self._stream_chat_response(request, thread_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Thread-ID": thread_id
+            }
+        )
+    
+    # Handle non-streaming response
+    else:
+        response_content = self.agent.process_chat_completion(request.messages)
+        
+        response = ChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4()}",
+            object="chat.completion",
+            created=int(time.time()),
+            model=request.model,
+            choices=[
+                ChatChoice(
+                    index=0,
+                    message={
+                        "role": "assistant",
+                        "content": response_content
+                    },
+                    finish_reason="stop"
+                )
+            ],
+            usage=ChatUsage(
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0
+            )
+        )
+        
+        return response
+```
+
+## 🎨 ExpertORT User Interface System
+
+The ExpertORT Agent features a sophisticated, modern web-based chat interface designed to provide an intuitive and seamless user experience for interacting with the AI assistant. The UI combines responsive design principles, accessibility features, and advanced interaction patterns to create a professional academic tool.
+
+### 🌟 Key UI Features Overview
+
+- **Responsive Chat Interface**: Modern messaging UI with real-time conversation support
+- **Mobile-First Design**: Optimized for all devices with adaptive layouts
+- **Interactive Welcome Screen**: Contextual onboarding with suggested questions
+- **Real-Time Typing Indicators**: Visual feedback during AI processing
+- **Conversation Management**: Session handling with clear and restart options
+- **Accessibility Support**: Screen reader compatible with keyboard navigation
+- **Professional Academic Theming**: Clean, academic-focused design language
+
+## 🏗️ UI Architecture & Component Structure
+
+The user interface follows a modular, component-based architecture:
+
+```
+📁 UI Architecture
+├── 🌐 Frontend Layer
+│   ├── index.html (Main Application Structure)
+│   ├── style.css (Core Styling & Theming)
+│   ├── mobile.css (Responsive & Mobile Optimizations)
+│   └── script.js (Interactive Functionality & API Communication)
+├── 🎨 Design System
+│   ├── CSS Custom Properties (Theme Variables)
+│   ├── Bootstrap 5.3 Integration
+│   └── Font Awesome Icons
+└── 📱 Responsive Framework
+    ├── Desktop Layout (≥992px)
+    ├── Tablet Layout (768px - 991px)
+    └── Mobile Layout (<768px)
+```
+
+### Component Hierarchy
+
+1. **Application Shell**: Main container with sidebar and chat area
+2. **Sidebar**: Navigation and conversation management
+3. **Chat Container**: Messages display and input area
+4. **Message System**: Individual message components with avatars
+5. **Input System**: Text area with send controls
+
+## 💬 Chat Interface Components
+
+### Main Chat Container
+
+**Location**: `ui/index.html` - Chat Container Section
+
+The central chat interface provides a familiar messaging experience:
+
+**Key Features**:
+- **Dual-Pane Layout**: Sidebar for navigation, main area for conversation
+- **Responsive Design**: Automatically adapts to screen size
+- **Professional Theming**: Academic-focused color scheme and typography
+- **Persistent Layout**: Maintains structure across different viewport sizes
+
+**HTML Structure**:
+```html
+<div class="chat-container h-100 d-flex flex-column">
+    <div class="chat-header"><!-- Agent info and controls --></div>
+    <div class="messages-container"><!-- Conversation area --></div>
+    <div class="input-area"><!-- Message input --></div>
+</div>
+```
+
+### Sidebar Navigation System
+
+**Location**: `ui/index.html` - Sidebar Section
+
+**Features**:
+- **Brand Identity**: ExpertORT logo with academic icon
+- **Session Management**: New conversation button
+- **Responsive Behavior**: Collapsible on mobile devices
+- **Status Indicators**: Agent availability display
+
+**Key Elements**:
+```html
+<div class="sidebar-header p-3 border-bottom">
+    <div class="logo-icon me-2">
+        <i class="fas fa-graduation-cap text-primary"></i>
+    </div>
+    <h6 class="mb-0 fw-bold">ExpertORT</h6>
+    <small class="text-muted">Asistente Académico</small>
+</div>
+```
+
+### Interactive Welcome Screen
+
+**Location**: `ui/index.html` - Welcome Message Section
+
+The welcome screen provides contextual onboarding for new users:
+
+**Features**:
+- **Personalized Greeting**: Introduces the AI assistant's capabilities
+- **Suggested Questions**: Pre-defined academic queries to start conversations
+- **Interactive Buttons**: One-click question submission
+- **Educational Context**: Clear explanation of the system's academic focus
+
+**Suggested Questions Include**:
+- "¿Qué es el mecanismo de atención en Inteligencia Artificial?"
+- "Explícame las redes neuronales Transformer"
+- "Resume el paper 'Attention is All You Need'"
+- "¿Cómo funcionan los encoders y decoders?"
+
+## 💬 Message System Architecture
+
+### Message Bubble Design
+
+**Location**: `ui/style.css` - Message Bubbles Section
+
+The messaging system implements a modern bubble-style interface:
+
+**User Messages**:
+- **Position**: Right-aligned with blue gradient background
+- **Styling**: Rounded corners with modern shadow effects
+- **Avatar**: User icon with subtle gradient
+- **Timestamp**: Discrete time display
+
+**Agent Messages**:
+- **Position**: Left-aligned with white background
+- **Styling**: Clean borders with professional appearance
+- **Avatar**: Robot icon with brand gradient
+- **Content Formatting**: Support for markdown, code, and links
+
+**CSS Implementation**:
+```css
+.message.user .message-content {
+    background: var(--message-user-bg);
+    color: white;
+    border-radius: 18px 18px 4px 18px;
+    padding: 12px 16px;
+}
+
+.message.agent .message-content {
+    background: var(--message-agent-bg);
+    color: var(--dark-color);
+    border-radius: 18px 18px 18px 4px;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+}
+```
+
+### Real-Time Typing Indicators
+
+**Location**: `ui/script.js` - Typing Indicator Functions
+
+Visual feedback system during AI processing:
+
+**Features**:
+- **Animated Dots**: Three-dot animation indicating processing
+- **Consistent Styling**: Matches agent message appearance
+- **Automatic Management**: Shows during API calls, hides on response
+- **Smooth Transitions**: Fade-in/fade-out animations
+
+**Implementation**:
+```javascript
+showTypingIndicator() {
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'typing-indicator';
+    typingDiv.innerHTML = `
+        <div class="message-avatar">
+            <i class="fas fa-robot"></i>
+        </div>
+        <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+        </div>
+    `;
+}
+```
+
+## ✍️ Advanced Input System
+
+### Smart Text Area
+
+**Location**: `ui/index.html` - Input Area Section
+
+The message input system provides advanced text handling:
+
+**Features**:
+- **Auto-Resize**: Dynamically adjusts height based on content (max 120px)
+- **Keyboard Shortcuts**: Enter to send, Shift+Enter for new line
+- **Smart Button State**: Send button enables/disables based on content
+- **Visual Feedback**: Focus states and hover effects
+- **Touch Optimization**: Mobile-friendly input handling
+
+**Input Controls**:
+```html
+<div class="input-group">
+    <textarea 
+        id="messageInput" 
+        class="form-control message-input" 
+        placeholder="Escribe tu mensaje aquí..." 
+        rows="1"
+        style="resize: none;"
+    ></textarea>
+    <button id="sendBtn" class="btn btn-primary" type="button">
+        <i class="fas fa-paper-plane"></i>
+    </button>
+</div>
+```
+
+### Send Button Intelligence
+
+**Location**: `ui/script.js` - Send Button State Management
+
+Smart button behavior based on content and loading state:
+
+**State Management**:
+```javascript
+updateSendButton() {
+    const hasText = this.messageInput.value.trim().length > 0;
+    const shouldEnable = hasText && !this.isLoading;
+    this.sendBtn.disabled = !shouldEnable;
+}
+```
+
+## 📱 Mobile-First Responsive Design
+
+### Responsive Breakpoints
+
+**Location**: `ui/style.css` & `ui/mobile.css` - Media Queries
+
+The interface adapts seamlessly across device sizes:
+
+**Desktop (≥992px)**:
+- Full sidebar visible
+- Wide message bubbles (max 70% width)
+- Hover effects enabled
+- Full feature set
+
+**Tablet (768px - 991px)**:
+- Collapsible sidebar
+- Medium message bubbles (max 85% width)
+- Touch-friendly interactions
+- Optimized spacing
+
+**Mobile (<768px)**:
+- Hidden sidebar with menu button
+- Narrow message bubbles (max 90% width)
+- Large touch targets (min 44px)
+- Simplified layout
+
+### Mobile Menu System
+
+**Location**: `ui/mobile.css` - Mobile Menu Implementation
+
+Touch-friendly navigation for mobile devices:
+
+**Features**:
+- **Hamburger Menu**: Standard mobile navigation pattern
+- **Slide Animation**: Smooth sidebar reveal/hide transitions
+- **Overlay Support**: Background overlay when menu is open
+- **Gesture Support**: Touch-based interactions
+
+**CSS Implementation**:
+```css
+@media (max-width: 991px) {
+    .sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+        position: fixed;
+        z-index: 1060;
+    }
+    
+    .sidebar.show {
+        transform: translateX(0);
+    }
+}
+```
+
+## 🎨 Design System & Theming
+
+### CSS Custom Properties
+
+**Location**: `ui/style.css` - Root Variables
+
+The interface uses a comprehensive design token system:
+
+**Color Palette**:
+```css
+:root {
+    --primary-color: #0d6efd;      /* Primary blue */
+    --secondary-color: #6c757d;     /* Neutral gray */
+    --success-color: #198754;       /* Success green */
+    --danger-color: #dc3545;        /* Error red */
+    --sidebar-bg: #ffffff;          /* Sidebar background */
+    --chat-bg: #f8f9fa;            /* Chat background */
+    --message-user-bg: #0d6efd;     /* User message blue */
+    --message-agent-bg: #ffffff;    /* Agent message white */
+    --border-color: #e9ecef;        /* Border gray */
+}
+```
+
+### Typography System
+
+**Font Stack**:
+- Primary: System font stack for optimal performance
+- Fallbacks: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto
+- Academic Focus: Clean, readable typography optimized for academic content
+
+### Icon System
+
+**Icon Library**: Font Awesome 6.4.0
+- **Navigation Icons**: Hamburger menu, plus, trash
+- **Status Icons**: Online indicator, loading spinners
+- **Message Icons**: User, robot, warning, info
+- **Action Icons**: Send (paper plane), graduation cap (brand)
+
+## 🔄 Interactive Features & Animations
+
+### Smooth Animations
+
+**Location**: `ui/style.css` - Animation Definitions
+
+Professional animation system for enhanced user experience:
+
+**Message Animations**:
+```css
+.message {
+    animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+```
+
+**Typing Indicator Animation**:
+```css
+.typing-dot {
+    animation: typing 1.4s infinite ease-in-out;
+}
+
+@keyframes typing {
+    0%, 80%, 100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+```
+
+### Hover Effects
+
+Interactive elements provide visual feedback:
+
+**Button Interactions**:
+- Scale transforms on hover (1.05x)
+- Smooth transitions (0.3s ease)
+- Disabled state handling
+- Focus indicators for accessibility
+
+**Suggested Question Cards**:
+- Elevation increase on hover
+- Shadow depth changes
+- Subtle transform animations
+
+## 💾 State Management & Persistence
+
+### Conversation Handling
+
+**Location**: `ui/script.js` - ExpertORTChat Class
+
+Sophisticated state management for conversation flow:
+
+**Key Features**:
+- **Session-Based Storage**: Conversations stored in localStorage during session
+- **Auto-Clear on Refresh**: Fresh start policy for new sessions
+- **Error State Recovery**: Graceful handling of API failures
+- **Loading State Management**: Prevents duplicate requests during processing
+
+**State Properties**:
+```javascript
+class ExpertORTChat {
+    constructor() {
+        this.apiBaseUrl = window.location.origin;
+        this.conversation = [];           // Message history
+        this.isLoading = false;          // Request state
+        this.abortController = null;     // Request cancellation
+    }
+}
+```
+
+### Local Storage Strategy
+
+**Data Management**:
+- Temporary conversation storage during active session
+- Automatic cleanup on page refresh/close
+- No persistent data retention for privacy
+- Error recovery with graceful degradation
+
+## 🌐 API Integration & Communication
+
+### Chat API Integration
+
+**Location**: `ui/script.js` - API Communication
+
+Real-time communication with the ExpertORT Agent backend:
+
+**Request Format**:
+```javascript
+const requestBody = {
+    model: "expertort-agent",
+    messages: this.conversation.map(msg => ({
+        role: msg.role,
+        content: msg.content
+    })),
+    stream: false
+};
+```
+
+**Response Handling**:
+- JSON response parsing
+- Error state management
+- Timeout handling
+- Retry logic for failed requests
+
+### Agent Status Monitoring
+
+**Health Check System**:
+```javascript
+async checkAgentStatus() {
+    try {
+        const response = await fetch(`${this.apiBaseUrl}/health`);
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
+```
+
+## ♿ Accessibility & Usability Features
+
+### Keyboard Navigation
+
+**Location**: `ui/script.js` - Event Handlers
+
+Comprehensive keyboard support for accessibility:
+
+**Key Bindings**:
+- **Enter**: Send message (without Shift)
+- **Shift + Enter**: New line in message
+- **Tab Navigation**: Proper focus management
+- **Escape**: Close mobile menu
+
+**Focus Management**:
+- Auto-focus on message input
+- Visible focus indicators
+- Logical tab order
+- Screen reader announcements
+
+### Screen Reader Support
+
+**ARIA Implementation**:
+- Semantic HTML structure
+- Proper heading hierarchy
+- Alt text for interactive elements
+- Live regions for dynamic content
+
+**Visual Accessibility**:
+- High contrast color combinations
+- Scalable text (rem units)
+- Clear visual hierarchy
+- Reduced motion support
+
+### Touch Device Optimization
+
+**Location**: `ui/mobile.css` - Touch Optimizations
+
+Mobile-first accessibility features:
+
+**Touch Targets**:
+- Minimum 44px touch targets
+- Proper spacing between interactive elements
+- Gesture-friendly swipe areas
+- iOS zoom prevention on input focus
+
+```css
+@media (hover: none) and (pointer: coarse) {
+    .suggested-question,
+    .btn {
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    
+    .message-input {
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+}
+```
+
+## 🛠️ Technical Implementation Details
+
+### Modern JavaScript Architecture
+
+**Location**: `ui/script.js` - Class-Based Structure
+
+ES6+ implementation with modern JavaScript patterns:
+
+**Class Structure**:
+```javascript
+class ExpertORTChat {
+    // Constructor and initialization
+    constructor() { /* Setup logic */ }
+    
+    // DOM management
+    initializeElements() { /* Element references */ }
+    attachEventListeners() { /* Event binding */ }
+    
+    // Conversation management
+    loadConversation() { /* State restoration */ }
+    saveConversation() { /* State persistence */ }
+    clearConversation() { /* State reset */ }
+    
+    // Message handling
+    sendMessage() { /* API communication */ }
+    renderMessage() { /* DOM updates */ }
+    formatMessageContent() { /* Content processing */ }
+    
+    // UI feedback
+    showTypingIndicator() { /* Loading states */ }
+    hideTypingIndicator() { /* State cleanup */ }
+    updateSendButton() { /* Button management */ }
+}
+```
+
+### Bootstrap 5.3 Integration
+
+**Framework Benefits**:
+- Responsive grid system
+- Pre-built components
+- Utility classes for rapid development
+- Cross-browser compatibility
+- Accessibility best practices
+
+**Custom Overrides**:
+- Brand color customization
+- Component styling modifications
+- Responsive breakpoint adjustments
+- Animation timing customization
+
+### Performance Optimizations
+
+**Rendering Performance**:
+- Efficient DOM manipulation
+- Minimal reflow/repaint operations
+- Optimized scroll handling
+- Lazy loading for long conversations
+
+**Network Performance**:
+- Request debouncing
+- Abort controller for request cancellation
+- Error retry mechanisms
+- Efficient JSON parsing
+
+## 🔧 Configuration & Customization
+
+### Theme Customization
+
+**CSS Custom Properties**: Easy theme modification through CSS variables
+**Color Schemes**: Support for brand customization
+**Typography**: Configurable font stacks and sizing
+**Spacing**: Consistent spacing system with CSS custom properties
+
+### Responsive Breakpoints
+
+**Customizable Breakpoints**:
+```css
+/* Desktop */
+@media (min-width: 992px) { /* Large screens */ }
+
+/* Tablet */
+@media (max-width: 991px) and (min-width: 768px) { /* Medium screens */ }
+
+/* Mobile */
+@media (max-width: 767px) { /* Small screens */ }
+```
+
+### Feature Toggles
+
+**Configurable Features**:
+- Welcome message display
+- Suggested questions
+- Typing indicators
+- Auto-scroll behavior
+- Session persistence
+
+## 🚀 Browser Support & Compatibility
+
+### Supported Browsers
+
+**Modern Browser Support**:
+- Chrome 90+ (Recommended)
+- Firefox 85+
+- Safari 14+
+- Edge 90+
+
+**Mobile Browser Support**:
+- iOS Safari 14+
+- Chrome Mobile 90+
+- Samsung Internet 13+
+
+### Progressive Enhancement
+
+**Core Functionality**:
+- Works without JavaScript (basic form submission)
+- Graceful degradation for older browsers
+- CSS Grid with Flexbox fallbacks
+- Modern features with polyfill support
+
+### Performance Metrics
+
+**Target Performance**:
+- First Contentful Paint: <2s
+- Largest Contentful Paint: <3s
+- Cumulative Layout Shift: <0.1
+- First Input Delay: <100ms
+
+---
+
+*The ExpertORT User Interface represents a modern, accessible, and intuitive gateway to advanced AI-powered academic assistance, designed specifically for the needs of Universidad ORT Uruguay students and faculty.*

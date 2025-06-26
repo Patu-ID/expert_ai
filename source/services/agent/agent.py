@@ -181,7 +181,7 @@ class ExpertORTAgent:
             "- Reranking inteligente para encontrar la información más relevante\n"
             "- Análisis de múltiples fuentes documentales\n\n"
             
-            "Siempre busca primero en la base de conocimientos antes de responder preguntas académicas."
+            "Siempre busca primero en la base de conocimientos antes de responder preguntas."
         )
         
         # Create tools
