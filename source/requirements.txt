@@ -19,6 +19,7 @@ docling
 # Text Processing
 langchain
 langchain-community
+langchain-text-splitters
 langgraph
 
 # File Processing
