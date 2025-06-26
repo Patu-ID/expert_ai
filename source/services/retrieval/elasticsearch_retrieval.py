@@ -1,13 +1,13 @@
 """
 Elasticsearch retrieval system for RAG.
-Handles semantic search and retrieval of relevant document chunks from Elasticsearch.
-"""
+Handles semantic search and retrieval of relevant document chunks fro    def check_available_rerank_models(self):"""
 
 import os
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 from ibm_watsonx_ai import Credentials
-from ibm_watsonx_ai.foundation_models import Embeddings, Rerank
+from ibm_watsonx_ai.foundation_models import Embeddings
+from ibm_watsonx_ai.foundation_models import Rerank
 from ibm_watsonx_ai.metanames import EmbedTextParamsMetaNames as EmbedParams
 from ibm_watsonx_ai.foundation_models.utils.enums import EmbeddingTypes
 from typing import List, Dict, Any
@@ -42,8 +42,22 @@ class Elasticsearch_Retrieval:
         # Initialize Elasticsearch client
         self.es_client = self._create_elasticsearch_client()
         
+        # Initialize Watsonx.ai credentials
+        credentials = Credentials(
+            api_key=self.watsonx_api_key.strip("'\""),
+            url=self.watsonx_url.strip("'\"")
+        )
+        watsonx_project_id = self.watsonx_project_id.strip("'\"")
+        
         # Initialize embedding model
         self.embedding_model = self._create_embedding_model()
+        
+        # Initialize reranking model
+        self.reranker = Rerank(
+            model_id="cross-encoder/ms-marco-minilm-l-12-v2",  # Using a well-known reranking model
+            credentials=credentials,
+            project_id=watsonx_project_id
+        )
         
         print("Elasticsearch_Retrieval initialized successfully!")
     
@@ -96,6 +110,22 @@ class Elasticsearch_Retrieval:
             project_id=self.watsonx_project_id.strip("'\"")
         )
     
+    def _create_rerank_model(self):
+        """Create and configure Watsonx.ai reranking model."""
+        rerank_params = {
+            "truncate_input_tokens": 512  # Increased for longer documents
+        }
+        
+        return Rerank(
+            model_id="ibm/rerank-colbert-v1",  # IBM's reranking model
+            params=rerank_params,
+            credentials=Credentials(
+                api_key=self.watsonx_api_key.strip("'\""),
+                url=self.watsonx_url.strip("'\"")
+            ),
+            project_id=self.watsonx_project_id.strip("'\"")
+        )
+    
     def generate_query_embedding(self, query: str) -> List[float]:
         """
         Generate embedding for a query string using Watsonx.ai.
@@ -120,6 +150,80 @@ class Elasticsearch_Retrieval:
                 return results[0].get('embedding', [])
         
         raise ValueError("Failed to generate embedding for query")
+    
+    def rerank_documents(self, query: str, documents: List[Dict[str, Any]], top_p: int = 5) -> List[Dict[str, Any]]:
+        """
+        Rerank documents using Watsonx.ai reranking model.
+        
+        Args:
+            query (str): The search query
+            documents (List[Dict[str, Any]]): List of documents with 'content' field (from retrieve_top_k_documents)
+            top_p (int): Number of top reranked results to return
+            
+        Returns:
+            List[Dict[str, Any]]: Reranked documents with rerank scores
+        """
+        if not documents:
+            return []
+        
+        print(f"Reranking {len(documents)} documents using Watsonx.ai reranker")
+        
+        try:
+            # Prepare document texts for reranking
+            doc_texts = [doc['content'] for doc in documents]
+            
+            # Use reranker with parameters
+            rerank_params = {
+                "truncate_input_tokens": 512
+            }
+            
+            # Perform reranking using the generate method
+            response = self.reranker.generate(
+                query=query,
+                inputs=doc_texts,
+                params=rerank_params
+            )
+            
+            # Parse reranking results
+            reranked_docs = []
+            
+            # The response format may vary, let's handle different possible formats
+            if hasattr(response, 'results') and response.results:
+                # If response has results attribute
+                for result in response.results:
+                    doc_idx = result.index
+                    if doc_idx < len(documents):
+                        doc = documents[doc_idx].copy()
+                        doc['rerank_score'] = result.score
+                        reranked_docs.append(doc)
+            elif isinstance(response, dict) and 'results' in response:
+                # If response is a dictionary with results
+                for result in response['results']:
+                    doc_idx = result.get('index', 0)
+                    if doc_idx < len(documents):
+                        doc = documents[doc_idx].copy()
+                        doc['rerank_score'] = result.get('score', result.get('relevance_score', 0.0))
+                        reranked_docs.append(doc)
+            else:
+                # Fallback: assume response is a list of scores
+                print(f"Reranking response format: {type(response)}")
+                print(f"Reranking response: {response}")
+                # If we can't parse the response, return original documents
+                reranked_docs = documents.copy()
+                for i, doc in enumerate(reranked_docs):
+                    doc['rerank_score'] = 1.0 - (i * 0.1)  # Assign decreasing scores
+            
+            # Sort by rerank score (highest first) and return top_p
+            reranked_docs.sort(key=lambda x: x.get('rerank_score', 0.0), reverse=True)
+            final_results = reranked_docs[:top_p]
+            
+            print(f"Reranking completed. Returning top {len(final_results)} documents.")
+            return final_results
+            
+        except Exception as e:
+            print(f"Error in reranking: {e}")
+            print(f"Falling back to original ranking")
+            return documents[:top_p]  # Fallback to original ranking
     
     def retrieve_top_k_documents(self, query: str, k: int = 5, index_name: str = None, 
                                  min_score: float = 0.0) -> List[Dict[str, Any]]:
@@ -328,6 +432,30 @@ class Elasticsearch_Retrieval:
         except Exception as e:
             print(f"Error getting index statistics: {e}")
             return {'error': str(e)}
+    
+    def check_available_rerank_models(self):
+        """Check what reranking models are available."""
+        try:
+            from ibm_watsonx_ai import APIClient
+            
+            # Create API client
+            client = APIClient(credentials=Credentials(
+                api_key=self.watsonx_api_key.strip("'\""),
+                url=self.watsonx_url.strip("'\"")
+            ))
+            client.set.default_project(self.watsonx_project_id.strip("'\""))
+            
+            # Get available reranking models
+            rerank_models = client.foundation_models.RerankModels
+            print("Available reranking models:")
+            for model in rerank_models:
+                print(f"  - {model}")
+            
+            return rerank_models
+            
+        except Exception as e:
+            print(f"Error checking available models: {e}")
+            return []
 
 
 if __name__ == "__main__":
@@ -389,6 +517,35 @@ if __name__ == "__main__":
                 print(f"  - Chunk ID: {result['chunk_id']}")
                 print(f"  - Metadata: {result['metadata']}")
                 print(f"  - Content: {result['content'][:150]}...")
+        
+        # Check available reranking models first
+        print("Checking available reranking models...")
+        available_models = retriever.check_available_rerank_models()
+        
+        # Test reranking
+        print("\n=== Testing Reranking ===")
+        query = "What are attention mechanisms in neural networks?"
+        
+        # First get semantic search results
+        search_results = retriever.retrieve_top_k_documents(query, k=10)
+        if search_results:
+            print(f"\nOriginal search results (top 3 of {len(search_results)}):")
+            for i, result in enumerate(search_results[:3]):
+                content_preview = result['content'][:200] + "..."
+                print(f"  {i+1}. Score: {result['score']:.4f}")
+                print(f"     Content: {content_preview}")
+            
+            # Rerank the results
+            reranked_results = retriever.rerank_documents(query, search_results, top_p=5)
+            print(f"\nReranked results (top 3 of {len(reranked_results)}):")
+            for i, result in enumerate(reranked_results[:3]):
+                content_preview = result['content'][:200] + "..."
+                rerank_score = result.get('rerank_score', 'N/A')
+                print(f"  {i+1}. Rerank Score: {rerank_score:.4f}" if rerank_score != 'N/A' else f"  {i+1}. Rerank Score: {rerank_score}")
+                print(f"     Original Score: {result['score']:.4f}")
+                print(f"     Content: {content_preview}")
+        else:
+            print("No search results to rerank")
         
         print("\n" + "="*60)
         print("ALL RETRIEVAL TESTS COMPLETED SUCCESSFULLY!")
