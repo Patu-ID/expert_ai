@@ -15,7 +15,7 @@ from langchain_ibm import ChatWatsonx
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 
-from services.retrieval.elasticsearch_retrieval import Elasticsearch_Retrieval
+from services.shared_services import shared_services
 
 # Load environment variables
 load_dotenv()
@@ -31,23 +31,36 @@ class ExpertORTAgent:
         """Initialize the ExpertORT Agent with all required components."""
         print("🤖 Initializing ExpertORT Agent...")
         
-        # Initialize the retrieval system
-        self.retrieval_system = self._initialize_retrieval_system()
+        # Use lazy initialization - services will be created only when needed
+        self._retrieval_system = None
+        self._agent_executor = None
         
-        # Initialize the LangGraph agent
-        self.agent_executor = self._create_agent()
-        
-        print("✅ ExpertORT Agent initialized successfully!")
+        print("✅ ExpertORT Agent initialized with lazy loading!")
     
-    def _initialize_retrieval_system(self) -> Elasticsearch_Retrieval:
-        """Initialize the Elasticsearch retrieval system."""
+    @property
+    def retrieval_system(self):
+        """Get the retrieval system instance using lazy initialization."""
+        if self._retrieval_system is None:
+            self._retrieval_system = self._initialize_retrieval_system()
+        return self._retrieval_system
+    
+    @property
+    def agent_executor(self):
+        """Get the agent executor instance using lazy initialization."""
+        if self._agent_executor is None:
+            self._agent_executor = self._create_agent()
+        return self._agent_executor
+    
+    def _initialize_retrieval_system(self):
+        """Initialize the Elasticsearch retrieval system using shared services."""
         try:
-            print("🔍 Initializing Elasticsearch retrieval system...")
-            retrieval_system = Elasticsearch_Retrieval()
+            print("🔍 Getting shared Elasticsearch retrieval system...")
+            retrieval_system = shared_services.get_elasticsearch_retrieval()
             print("✅ Retrieval system initialized successfully!")
             return retrieval_system
         except Exception as e:
             print(f"❌ Error initializing retrieval system: {e}")
+            return None
             print("⚠️ Agent will continue without knowledge base access")
             return None
     

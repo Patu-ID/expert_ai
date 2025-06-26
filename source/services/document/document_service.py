@@ -11,8 +11,7 @@ from typing import List, Dict, Any, Optional
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, '..', '..'))
 
-from services.index.elasticsearch_index import Elasticsearch_Index
-from services.retrieval.elasticsearch_retrieval import Elasticsearch_Retrieval
+from services.shared_services import shared_services
 
 
 class DocumentService:
@@ -22,26 +21,36 @@ class DocumentService:
     """
     
     def __init__(self):
-        """Initialize the document service with indexing and retrieval capabilities."""
+        """Initialize the document service with indexing and retrieval capabilities using shared services."""
         print("🗂️ Initializing Document Service...")
         
-        # Initialize indexing system
-        try:
-            self.indexer = Elasticsearch_Index()
-            print("✅ Indexer initialized successfully!")
-        except Exception as e:
-            print(f"❌ Error initializing indexer: {e}")
-            self.indexer = None
+        # We'll use lazy initialization - services will be created only when needed
+        self._indexer = None
+        self._retriever = None
         
-        # Initialize retrieval system
-        try:
-            self.retriever = Elasticsearch_Retrieval()
-            print("✅ Retriever initialized successfully!")
-        except Exception as e:
-            print(f"❌ Error initializing retriever: {e}")
-            self.retriever = None
-        
-        print("✅ Document Service initialized!")
+        print("✅ Document Service initialized with lazy loading!")
+    
+    @property
+    def indexer(self):
+        """Get the indexer instance using lazy initialization."""
+        if self._indexer is None:
+            try:
+                self._indexer = shared_services.get_elasticsearch_index()
+            except Exception as e:
+                print(f"❌ Error getting indexer: {e}")
+                self._indexer = None
+        return self._indexer
+    
+    @property
+    def retriever(self):
+        """Get the retriever instance using lazy initialization."""
+        if self._retriever is None:
+            try:
+                self._retriever = shared_services.get_elasticsearch_retrieval()
+            except Exception as e:
+                print(f"❌ Error getting retriever: {e}")
+                self._retriever = None
+        return self._retriever
     
     def index_file(self, file_bytes: bytes, filename: str, index_name: str, 
                    chunk_size: int = 500, chunk_overlap: int = 50) -> Dict[str, Any]:
