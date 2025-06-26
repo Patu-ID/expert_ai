@@ -1,0 +1,28 @@
+# FastAPI and Web Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Environment Variables
+python-dotenv
+
+# Elasticsearch
+elasticsearch
+
+# IBM Watsonx.ai
+ibm-watson-machine-learning
+
+# Document Processing with Docling
+docling
+
+# Text Processing
+langchain
+langchain-community
+langgraph
+
+# File Processing
+python-multipart
+
+# CORS
+fastapi-cors
